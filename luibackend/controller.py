@@ -1,5 +1,5 @@
 import datetime
-from helper import scale, pos_to_color
+from helper import scale, pos_to_color, rgb_dec565
 
 from pages import LuiPagesGen
 
@@ -95,7 +95,7 @@ class LuiController(object):
         sleepBrightness = 0
         brightness = self.calc_current_brightness(self._config.get("screenBrightness"))
 
-        if bst is not None and self._ha_api.entity_exists(bst) and self._ha_api.get_entity(bst).state in ["not_home", "off"]:
+        if bst is not None and self._ha_api.entity_exists(bst) and self._ha_api.get_entity(bst).state in self._config.get("sleepTrackingZones"):
             self._ha_api.log(f"sleepTracking setting brightness to 0")
             sleepBrightness = 0
 
@@ -111,7 +111,19 @@ class LuiController(object):
         # same value for both values will break sleep timer of the firmware
         if sleepBrightness==brightness:
             sleepBrightness = sleepBrightness-1
-        self._send_mqtt_msg(f"dimmode~{sleepBrightness}~{brightness}")
+
+        # background color
+        dbc = 0
+        defaultBackgroundColor = self._config.get("defaultBackgroundColor")
+        if type(defaultBackgroundColor) is str:
+            if defaultBackgroundColor == "ha-dark":
+                dbc = 6371
+            elif defaultBackgroundColor == "black":
+                dbc = 0
+        elif type(defaultBackgroundColor) is list:
+            dbc = rgb_dec565(defaultBackgroundColor)
+
+        self._send_mqtt_msg(f"dimmode~{sleepBrightness}~{brightness}~{dbc}")
         
     def calc_current_brightness(self, sleep_brightness_config):
         current_screensaver_brightness = 20
@@ -125,18 +137,17 @@ class LuiController(object):
             sorted_timesets = sorted(sleep_brightness_config, key=lambda d: self._ha_api.parse_time(d['time']))
             # calc current screensaver brightness
             found_current_dim_value = False
-            for index, timeset in enumerate(sorted_timesets):
-                self._ha_api.log("Current time %s", self._ha_api.get_now().time())
-                if self._ha_api.parse_time(timeset["time"]) > self._ha_api.get_now().time() and not found_current_dim_value:
-                    # first time after current time, set dim value
-                    current_screensaver_brightness = sorted_timesets[index-1]["value"]
-                    self._ha_api.log("Setting dim value to %s", sorted_timesets[index-1])
+            for i in range(len(sorted_timesets)):
+                found = self._ha_api.now_is_between(sorted_timesets[i-1]['time'], sorted_timesets[i]['time'])
+                if found:
                     found_current_dim_value = True
+                    current_screensaver_brightness = sorted_timesets[i-1]['value']
             # still no dim value
             if not found_current_dim_value:
-                current_screensaver_brightness = sorted_timesets[-1]["value"]
+                self._ha_api.log("Chooseing %s as fallback", sorted_timesets[0])
+                current_screensaver_brightness = sorted_timesets[0]["value"]
         return current_screensaver_brightness
-
+    
     def register_callbacks(self):
         items = self._config.get_all_entity_names()
         self._ha_api.log(f"Registering callbacks for the following items: {items}")
@@ -156,6 +167,8 @@ class LuiController(object):
                     self._pages_gen.generate_light_detail_page(entity)
                 if entity.startswith("cover"):
                     self._pages_gen.generate_shutter_detail_page(entity)
+                if entity.startswith("fan"):
+                    self._pages_gen.generate_fan_detail_page(entity)
 
 
     def detail_open(self, detail_type, entity_id):
@@ -163,6 +176,8 @@ class LuiController(object):
             self._pages_gen.generate_shutter_detail_page(entity_id)
         if detail_type == "popupLight":
             self._pages_gen.generate_light_detail_page(entity_id)
+        if detail_type == "popupFan":
+            self._pages_gen.generate_fan_detail_page(entity_id)
 
     def button_press(self, entity_id, button_type, value):
         self._ha_api.log(f"Button Press Event; entity_id: {entity_id}; button_type: {button_type}; value: {value} ")
@@ -223,7 +238,9 @@ class LuiController(object):
 
         if button_type == "number-set":
             if entity_id.startswith('fan'):
-                self._ha_api.get_entity(entity_id).call_service("set_percentage", percentage=value)
+                entity = self._ha_api.get_entity(entity_id)
+                value = float(value)*float(entity.attributes.get("percentage_step", 0))
+                entity.call_service("set_percentage", percentage=value)
             else:
                 self._ha_api.get_entity(entity_id).call_service("set_value", value=value)
 
@@ -237,6 +254,16 @@ class LuiController(object):
         if button_type == "positionSlider":
             pos = int(value)
             self._ha_api.get_entity(entity_id).call_service("set_cover_position", position=pos)
+        if button_type == "tiltOpen":
+            self._ha_api.get_entity(entity_id).call_service("open_cover_tilt")
+        if button_type == "tiltStop":
+            self._ha_api.get_entity(entity_id).call_service("stop_cover_tilt")
+        if button_type == "tiltClose":
+            self._ha_api.get_entity(entity_id).call_service("close_cover_tilt")
+        if button_type == "tiltSlider":
+            pos = int(value)
+            self._ha_api.get_entity(entity_id).call_service("set_cover_tilt_position", position=pos)
+
 
         if button_type == "button":
             if entity_id.startswith('navigate'):
@@ -260,7 +287,9 @@ class LuiController(object):
                 else:
                     self._ha_api.get_entity(entity_id).call_service("lock")
             elif entity_id.startswith('button') or entity_id.startswith('input_button'):
-                self._ha_api.get_entity(entity_id).call_service("press") 
+                self._ha_api.get_entity(entity_id).call_service("press")
+            elif entity_id.startswith('input_select'):
+                self._ha_api.get_entity(entity_id).call_service("select_next")
 
         # for media page
         if button_type == "media-next":
