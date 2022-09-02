@@ -78,9 +78,8 @@ class LuiController(object):
 
 
     def update_screensaver_brightness_state_callback(self, entity, attribute, old, new, kwargs):
-        if type(self._config.get("sleepBrightness")) == str:
-            self.current_screensaver_brightness = self.calc_current_brightness(self._config.get("sleepBrightness"))
-            self.current_screen_brightness      = self.calc_current_brightness(self._config.get("screenBrightness"))
+        self.current_screensaver_brightness = self.calc_current_brightness(self._config.get("sleepBrightness"))
+        self.current_screen_brightness      = self.calc_current_brightness(self._config.get("screenBrightness"))
         self.update_screensaver_brightness(kwargs={"ssbr": self.current_screensaver_brightness, "sbr": self.current_screen_brightness})
         
     def update_screensaver_brightness(self, kwargs):
@@ -157,8 +156,8 @@ class LuiController(object):
 
     def state_change_callback(self, entity, attribute, old, new, kwargs):
         self._ha_api.log(f"Got callback for: {entity}", level="DEBUG")
-        self._ha_api.log(f"Current page has the following items: {self._current_card.get_entity_list()}", level="DEBUG")
-        if entity in self._current_card.get_entity_list():
+        self._ha_api.log(f"Current page has the following items: {self._current_card.get_entity_names()}", level="DEBUG")
+        if entity in self._current_card.get_entity_names():
             self._ha_api.log(f"Callback Entity is on current page: {entity}", level="DEBUG")
             self._pages_gen.render_card(self._current_card, send_page_type=False)
             # send detail page update, just in case
@@ -266,6 +265,10 @@ class LuiController(object):
 
 
         if button_type == "button":
+            if entity_id.startswith('uuid'):
+                le = self._config._config_entites_table.get(entity_id)
+                entity_id = le.entityId
+
             if entity_id.startswith('navigate'):
                 # internal for navigation to nested pages
                 dstCard = self._config.searchCard(entity_id)
@@ -279,7 +282,7 @@ class LuiController(object):
                 self._ha_api.get_entity(entity_id).call_service("turn_on")
             elif entity_id.startswith('script'):
                 self._ha_api.get_entity(entity_id).call_service("turn_on")
-            elif entity_id.startswith('light') or entity_id.startswith('switch') or entity_id.startswith('input_boolean') or entity_id.startswith('automation'):
+            elif entity_id.startswith('light') or entity_id.startswith('switch') or entity_id.startswith('input_boolean') or entity_id.startswith('automation') or entity_id.startswith('fan'):
                 self._ha_api.get_entity(entity_id).call_service("toggle")
             elif entity_id.startswith('lock'):
                 if self._ha_api.get_entity(entity_id).state == "locked":
@@ -290,6 +293,11 @@ class LuiController(object):
                 self._ha_api.get_entity(entity_id).call_service("press")
             elif entity_id.startswith('input_select'):
                 self._ha_api.get_entity(entity_id).call_service("select_next")
+            elif entity_id.startswith('vacuum'):
+                if self._ha_api.get_entity(entity_id).state == "docked":
+                    self._ha_api.get_entity(entity_id).call_service("start")
+                else:
+                    self._ha_api.get_entity(entity_id).call_service("return_to_base")
 
         # for media page
         if button_type == "media-next":
@@ -348,6 +356,6 @@ class LuiController(object):
             entity = self._ha_api.get_entity(entity_id)
             if "open_sensors" in entity.attributes and entity.attributes.open_sensors is not None:
                 for e in entity.attributes.open_sensors:
-                    msg += f"- {self._ha_api.get_entity(e).attributes.friendly_name}\n"
+                    msg += f"- {self._ha_api.get_entity(e).attributes.friendly_name}\r\n"
             self._pages_gen.send_message_page("opnSensorNotifyRes", "", msg, "", "")
 
