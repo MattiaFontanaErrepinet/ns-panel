@@ -247,14 +247,23 @@ class LuiPagesGen(object):
             else:
                 return f"~text~{entityId}~{get_icon_id('alert-circle-outline')}~17299~page not found~"
         if entityType == "iText":
-                value   = entityId.split(".", 2)[1]
-                name = name if name is not None else "conf name missing"
-                icon_res = get_icon_id(icon) if icon is not None else get_icon_id("alert-circle-outline")
-                return f"~text~{entityId}~{icon_res}~17299~{name}~{value}"
+            value   = entityId.split(".", 2)[1]
+            name = name if name is not None else "conf name missing"
+            icon_res = get_icon_id(icon) if icon is not None else get_icon_id("alert-circle-outline")
+            return f"~text~{entityId}~{icon_res}~17299~{name}~{value}"
         if entityType == "service":
             icon_id = get_icon_id_ha("script", overwrite=icon)
             text = get_translation(self._locale, "frontend.ui.card.script.run")
-            return f"~button~{uuid}~{icon_id}~17299~{name}~{text}"
+            icon_color = 17299
+            if item.status is not None and self._ha_api.entity_exists(item.status):
+                status_entity = self._ha_api.get_entity(item.status)
+                icon_id = get_icon_id_ha(item.status.split(".")[0], state=status_entity.state, device_class=status_entity.attributes.get("device_class", "_"), overwrite=icon)
+                icon_color = self.get_entity_color(status_entity, ha_type=item.status.split(".")[0], overwrite=colorOverride)
+                if item.status.startswith("sensor") and cardType == "cardGrid":
+                    icon_id = status_entity.state[:4]
+                    if icon_id[-1] == ".":
+                        icon_id = icon_id[:-1]
+            return f"~button~{uuid}~{icon_id}~{icon_color}~{name}~{text}"
         if not self._ha_api.entity_exists(entityId):
             return f"~text~{entityId}~{get_icon_id('alert-circle-outline')}~17299~Not found check~ apps.yaml"
         
@@ -318,7 +327,7 @@ class LuiPagesGen(object):
             value = entity.state + " " + unit_of_measurement
             if entityType == "binary_sensor":
                 value = get_translation(self._locale, f"backend.component.binary_sensor.state.{device_class}.{entity.state}")
-            if cardType == "cardGrid" and entityType == "sensor":
+            if cardType == "cardGrid" and entityType == "sensor" and icon is None:
                 icon_id = entity.state[:4]
                 if icon_id[-1] == ".":
                     icon_id = icon_id[:-1]
@@ -409,8 +418,11 @@ class LuiPagesGen(object):
             min_temp     = int(get_attr_safe(entity, "min_temp", 0)*10)
             max_temp     = int(get_attr_safe(entity, "max_temp", 0)*10)
             step_temp    = int(get_attr_safe(entity, "target_temp_step", 0.5)*10) 
+            icon_res_list = []
             icon_res = ""
+
             hvac_modes = get_attr_safe(entity, "hvac_modes", [])
+
             for mode in hvac_modes:
                 icon_id = get_icon_id('alert-circle-outline')
                 color_on = 64512
@@ -435,15 +447,25 @@ class LuiPagesGen(object):
                 state = 0
                 if(mode == entity.state):
                     state = 1
-                icon_res += f"~{icon_id}~{color_on}~{state}~{mode}"
-    
-            len_hvac_modes = len(hvac_modes)
-            padding_len = 8-len_hvac_modes
-            icon_res = icon_res + "~"*4*padding_len
+                
+                icon_res_list.append(f"~{icon_id}~{color_on}~{state}~{mode}")
+
+            icon_res = "".join(icon_res_list)
+
+            if len(icon_res_list) == 1:
+                icon_res = "~"*4 + icon_res_list[0] + "~"*4*6
+            elif len(icon_res_list) == 2:
+                icon_res = "~"*4*2 + icon_res_list[0] + "~"*4*2 + icon_res_list[1] + "~"*4*2
+            elif len(icon_res_list) == 3:
+                icon_res = "~"*4*2 + icon_res_list[0] + "~"*4 + icon_res_list[1] + "~"*4 + icon_res_list[2] + "~"*4
+            elif len(icon_res_list) == 4:
+                icon_res = "~"*4 + icon_res_list[0] + "~"*4 + icon_res_list[1] + "~"*4 + icon_res_list[2] + "~"*4 + icon_res_list[3]
+            elif len(icon_res_list) >= 5:
+                icon_res = "~"*4 + "".join(icon_res_list) + "~"*4*(7-len(icon_res_list))
             
             currently_translation = get_translation(self._locale, "frontend.ui.card.climate.currently")
             state_translation = get_translation(self._locale, "frontend.ui.panel.config.devices.entities.state")
-            action_translation = get_translation(self._locale, "frontend.ui.card.climate.operation")
+            action_translation = get_translation(self._locale, "frontend.ui.card.climate.operation").replace(' ','\r\n')
 
             command = f"entityUpd~{heading}~{navigation}~{item}~{current_temp} {temperature_unit}~{dest_temp}~{state_value}~{min_temp}~{max_temp}~{step_temp}{icon_res}~{currently_translation}~{state_translation}~{action_translation}~{temperature_unit_icon}~{dest_temp2}"
         self._send_mqtt_msg(command)
@@ -612,6 +634,9 @@ class LuiPagesGen(object):
         brightness = "disable"
         color_temp = "disable"
         color = "disable"
+        
+        if "onoff" not in entity.attributes.supported_color_modes:
+            brightness = 0
         if entity.state == "on":
             if "brightness" in entity.attributes:
                 # scale 0-255 brightness from ha to 0-100
@@ -709,15 +734,26 @@ class LuiPagesGen(object):
         switch_val = 1 if entity.state == "on" else 0
         icon_color = self.get_entity_color(entity)
         speed = entity.attributes.get("percentage")
+        percentage_step = entity.attributes.get("percentage_step")
         speedMax = 100
-        if(speed is None):
+        if percentage_step is None:
             speed = "disable"
         else:
-            speed = round(entity.attributes.get("percentage")/entity.attributes.get("percentage_step"))
-            speedMax = int(100/entity.attributes.get("percentage_step"))
+            if speed is None:
+                speed = 0
+            speed = round(speed/percentage_step)
+            speedMax = int(100/percentage_step)
 
         speed_translation = get_translation(self._locale, "frontend.ui.card.fan.speed")
-        self._send_mqtt_msg(f"entityUpdateDetail~{entity_id}~{get_icon_id('fan')}~{icon_color}~{switch_val}~{speed}~{speedMax}~{speed_translation}")
+
+        preset_mode = entity.attributes.get("preset_mode", "")
+        preset_modes = entity.attributes.get("preset_modes", [])
+        if preset_modes is not None:
+            preset_modes = "?".join(entity.attributes.get("preset_modes", []))
+        else:
+            preset_modes = ""
+
+        self._send_mqtt_msg(f"entityUpdateDetail~{entity_id}~{get_icon_id('fan')}~{icon_color}~{switch_val}~{speed}~{speedMax}~{speed_translation}~{preset_mode}~{preset_modes}")
 
     def send_message_page(self, ident, heading, msg, b1, b2):
         self._send_mqtt_msg(f"pageType~popupNotify")

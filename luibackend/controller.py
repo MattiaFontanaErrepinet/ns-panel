@@ -298,6 +298,8 @@ class LuiController(object):
                     self._ha_api.get_entity(entity_id).call_service("start")
                 else:
                     self._ha_api.get_entity(entity_id).call_service("return_to_base")
+            elif entity_id.startswith('service'):
+                self._ha_api.call_service(entity_id.replace('service.', '', 1).replace('.','/', 1), **le.data)
 
         # for media page
         if button_type == "media-next":
@@ -359,3 +361,8 @@ class LuiController(object):
                     msg += f"- {self._ha_api.get_entity(e).attributes.friendly_name}\r\n"
             self._pages_gen.send_message_page("opnSensorNotifyRes", "", msg, "", "")
 
+        # for fan popup / preset selection
+        if button_type == "mode-sel":
+            entity = self._ha_api.get_entity(entity_id)
+            preset_mode = entity.attributes.preset_modes[int(value)]
+            entity.call_service("set_preset_mode", preset_mode=preset_mode)
