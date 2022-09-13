@@ -186,13 +186,6 @@ class LuiPagesGen(object):
                     color = self.get_entity_color(entity, overwrite=[255,255,255])
                 else:
                     color = self.get_entity_color(entity, overwrite=[105,105,105]) 
-                #if colors is not None:
-                    #for key,value in colors.items():
-                    #    if entity.state == key:
-                    #        color = self.get_entity_color(entity, overwrite=value) 
-                    #    else:
-                    #        color = self.get_entity_color(entity, overwrite=[255,0,255])        
-                #self.get_entity_color(entity, overwrite=statusIcon.get("color", None))
                 status_res += f"~{icon}~{color}"
         for i in range(2,3):
             statusIcon = self._config._config_screensaver.raw_config.get(f"statusIcon{i}")
